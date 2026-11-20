@@ -20,6 +20,10 @@ Sections:
 1. **Runs**: GPU time and storage of every job.
 2. **Confidence vs MSA depth**, per backend.
 3. **TM-helix Ca PCA** over all models of a protein (fit on confident models).
+4. **Conformational states**: outward-open / occluded / inward-open read
+   from the extremities of the PCA cloud (the V / lambda shape), with
+   {{ (cfg.get("tm_states") or {}).get("n_export", 20) }} models per state
+   written for ChimeraX to ``results/<protein>/tm_states/structures/``.
 
 Structures are not kept as CIF files: ``scripts/export_models.py`` rebuilds
 any model as mmCIF / PDB from the Parquet store (README).

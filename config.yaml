@@ -42,6 +42,17 @@ tm_pca:
   n_states: 3
   min_tm_plddt: 70
 
+# ── OF / Occ / IF from the PCA extremities (scripts/tm_states.py) ─────────
+# Corners of the V / lambda drawn by the fitted models in PC1-PC2, not a
+# density clustering (GMM / HDBSCAN split the dense arms and miss the tip).
+tm_states:
+  mass_frac: 0.005           # trim: a model needs >= this fraction of the models (min 15) ...
+  radius_frac: 0.05          # ... within this fraction of the cloud diameter
+  n_export: 20               # models written per state (spread over its alpha range)
+  max_betweenness: 0.5       # QC: occluded tip excess / next corner's (small = clear tip)
+  min_flatness: 0.1          # QC: 2 x triangle area / longest side^2 (a line has no tip)
+  min_gap: 5.0               # QC: OF-IF (extra - intra) difference, A
+
 # ── Report ───────────────────────────────────────────────────────────────
 report:
   figure_formats: ["svg"]
