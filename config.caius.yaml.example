@@ -1,0 +1,38 @@
+# CAIUS (Université de Strasbourg mésocentre, hpc-login.u-strasbg.fr, account
+# ibmp) machine config. scripts/caius/setup.sh copies it to config.local.yaml
+# (gitignored), deep-merged over config.yaml. Cluster facts from the
+# NanoPulldown and CF-random CAIUS runs (2026-10/11):
+#  - compute nodes have NO internet: every env and every weight file is
+#    fetched on the login node (scripts/caius/setup.sh, prime_backends.sh)
+#  - sbatch rejects --gpus: --gres=gpu:1, GPU type by node feature (--constraint)
+#  - publicgpu: 24 h max, jobs can be PREEMPTED and requeued (a job here
+#    restarts its backend from scratch: < 4 h)
+#  - RHEL 8 libstdc++ is too old for conda numpy: conda lib first
+
+abcfold:
+  # ABCfold builds one micromamba env per backend (abcfold-boltz-py311, ...)
+  # under this root, with ~/.local/bin/micromamba (found by ABCfold itself)
+  mamba_root_prefix: "/home2020/home/ibmp/ereboul/micromamba"
+  # Chai-1 fetches its weights at the first inference unless they are here
+  # (filled on the login node by scripts/caius/prime_backends.sh)
+  chai_downloads_dir: "/home2020/home/ibmp/ereboul/abcfold_weights/chai1"
+  # Protenix's checkpoint + CCD cache (default would be $HOME/checkpoint, $HOME/common)
+  protenix_root_dir: "/home2020/home/ibmp/ereboul/abcfold_weights/protenix"
+  conda_lib_first: true
+
+hpc:
+  gpu_partition: "publicgpu"
+  gpu_request: "gres"
+  # 212k models: attempt 1 takes ANY publicgpu card (P100 / V100 / RTX 5000-6000
+  # included; user decision 2026-11-17: "as long as it runs without crashing").
+  # Old cards can still crash a backend (no bf16 on P100/V100, cuEquivariance
+  # kernels need sm_80+) or be ~10x slower: a failed job is retried on sm_80+.
+  # every publicgpu node has the "gpu" feature except the H200 ones (hpc-n977-981,
+  # 8 GPUs each): "gpu|gpuh200" = all of them. ("" would still be passed as
+  # -C '' by the SLURM plugin.)
+  gpu_constraint: "gpu|gpuh200"
+  gpu_constraint_retry: "gpua100|gpuh100|gpul40s|gpua40|gpuh200"
+  exclude_nodes: ""
+  mem_mb: 64000
+  cpus: 8
+  scratch: ""            # "" = the job's $TMPDIR (node-local /tmp, profiles/caius)

@@ -1,0 +1,1 @@
+Every run_abcfold GPU job (one backend on one protein x depth): ABCfold wall time against protein length (legend: total GPU-hours per backend), and the storage per model, ABCfold's own output (deleted inside the job) against the Parquet model store that replaces it (coordinates to 0.001 A, per-atom pLDDT, PAE as uint8 at {{ snakemake.config["store"]["pae_step"] }} A).

@@ -1,0 +1,24 @@
+# Snakemake profile for CAIUS (SLURM 22.05). Launch with scripts/caius/run.sh
+# from the checkout on hpc-login, inside tmux (README "Running on CAIUS").
+# GPU jobs (run_abcfold) take partition / gres / constraint / walltime from
+# the Snakefile (config.local.yaml's hpc: block); everything else is a CPU job
+# on `public`, sized below. Settings learned on NanoPulldown's CAIUS runs.
+executor: slurm
+software-deployment-method: conda   # rule envs prebuilt by scripts/caius/setup.sh
+jobs: 120
+latency-wait: 60             # BeeGFS
+retries: 2                   # preempted / transient failures: a job restarts its backend cleanly
+keep-going: true
+rerun-incomplete: true
+printshellcmds: true
+# greedy, not ILP: the ILP scheduler writes to /tmp, and hpc-login1's root fs
+# fills up (killed a NanoPulldown controller on 2026-10-22)
+scheduler: greedy
+
+default-resources:
+  slurm_account: "ibmp"
+  slurm_partition: "public"
+  mem_mb: 4000
+  runtime: 60                # minutes
+  cpus_per_task: 1
+  tmpdir: "'/tmp'"           # jobs' TMPDIR: node-local, not the controller's ($HOME/tmp, run.sh)

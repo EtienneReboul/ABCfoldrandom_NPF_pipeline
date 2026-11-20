@@ -1,0 +1,79 @@
+# =============================================================================
+# ABCfoldrandom_NPF_pipeline: shared defaults (tracked)
+# =============================================================================
+# CF-random's sampling recipe (full MSA + 7 randomly subsampled shallow MSAs)
+# applied to the open-weight ABCfold backends (Boltz, Chai-1, OpenFold3,
+# Protenix, RosettaFold3; AlphaFold3 left out on purpose: weights terms of use)
+# for every Arabidopsis NPF. Machine-specific values (CAIUS paths, GPU
+# classes) go in config.local.yaml (see config.caius.yaml.example).
+
+# ── Inputs, copied once on the Mac from the sibling CF-random pipeline ─────
+# data/inputs/<protein>/{<protein>.a3m.xz, sequence.fasta, topology.json}:
+# the same ColabFold-server MSA (ABCfold apo unpairedMsa) and DeepTMHMM
+# topology CF-random used, so the two runs differ only in the predictors.
+cfrandom_repo: "../CFrandom_NPF_pipeline"
+proteins: []              # empty = every protein in <cfrandom_repo>/data/inputs/proteins.txt
+
+# ── MSA depths (CF-random's) ─────────────────────────────────────────────
+# full = the whole MSA (each backend applies its own internal cap).
+# [m, e] = query + m + e sequences drawn at random (without replacement) from
+# the full MSA. ColabFold's max_seq:max_extra_seq has no equivalent in these
+# backends, so the depth is applied to the MSA itself: the same subsample is
+# fed to every backend. The draw is keyed on (master_seed, protein, depth).
+depths: [[1, 2], [2, 4], [4, 8], [8, 16], [16, 32], [32, 64], [64, 128]]
+master_seed: 2025
+
+# ── ABCfold sampling ───────────────────────────────────────────────────────
+abcfold:
+  backends: [boltz, chai1, openfold3, protenix, rosettafold3]
+  version: "1.1.6"
+  n_seeds: 20                # modelSeeds per (protein, depth); same seeds for every backend
+  number_of_models: 5        # samples per seed (ABCfold --number_of_models)
+  num_recycles: 10           # ABCfold default; the ABCfold NPF run used 25, CF-random 3 (AF2 default)
+  templates: false           # no templates at any depth (CF-random uses none)
+
+# ── Storage (scripts/abcstore.py; no CIF is kept) ──────────────────────────
+store:
+  pae_step: 0.25             # A per uint8 step: max error 0.125 A (backends' own PAE bins are 0.5 A)
+  zstd_level: 19
+
+# ── TM-helix Ca PCA (as CFrandom_NPF_pipeline step 8) ──────────────────────
+tm_pca:
+  n_states: 3
+  min_tm_plddt: 70
+
+# ── Report ───────────────────────────────────────────────────────────────
+report:
+  figure_formats: ["svg"]
+
+dirs:
+  inputs:      "data/inputs"         # per protein: a3m.xz, sequence.fasta, topology.json
+  fold_inputs: "data/fold_inputs"    # per protein: <depth>.json.xz (ABCfold AF3-dialect input)
+  results:     "results"             # per protein: predictions/<depth>/<backend>/{models,pae,atoms}.parquet
+  reports:     "reports"
+  logs:        "logs"
+
+# ── SLURM (only read with a cluster profile) ─────────────────────────────
+hpc:
+  gpu_partition: "gpu"
+  gpu_request: "gpus"          # "gres" on clusters that reject --gpus (CAIUS)
+  gpu_constraint: ""            # attempt 1: SLURM feature expression ("" = any GPU)
+  gpu_constraint_retry: ""      # retries (after a crash / OOM / timeout on attempt 1)
+  exclude_nodes: ""
+  mem_mb: 64000
+  cpus: 8
+  scratch: ""                  # raw ABCfold output dir on the compute node ("" = $TMPDIR)
+  # walltime per (protein, depth, backend) job = load_min + per-backend minutes
+  # for 20 seeds x 5 samples at 600 aa, scaled (L/600)^exponent, x safety
+  # (x first_attempt_factor on attempt 1, which may land on a pre-Ampere card).
+  # minutes_600aa = H200 fold times of the CAIUS pilot (NPF2.10, 636 aa,
+  # 10 recycles, 2026-11-18) scaled to 600 aa. Measured ratios to H200:
+  # A100/A40 ~2-2.5x (safety 3 covers retries), RTX 6000 ~7x, P100 ~9x
+  # (safety x first_attempt_factor = 12 covers attempt 1).
+  time_fit:
+    load_min: 15
+    exponent: 2.0
+    safety: 3.0
+    first_attempt_factor: 4.0
+    minutes_600aa: {boltz: 20, chai1: 55, openfold3: 12, protenix: 25, rosettafold3: 20}
+  runtime_max: 1440

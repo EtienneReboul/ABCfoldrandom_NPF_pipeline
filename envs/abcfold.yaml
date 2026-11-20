@@ -1,0 +1,14 @@
+name: abcfoldrandom-abcfold
+# GPU rule run_abcfold: the ABCfold CLI (which builds and calls one micromamba
+# env per backend: abcfold-boltz-py311, abcfold-chai-py311, ... under
+# $MAMBA_ROOT_PREFIX, see scripts/caius/setup.sh) + the packing code
+# (scripts/abcstore.py: numpy, pyarrow, pandas, gemmi, all ABCfold deps too).
+# ABCfold pins numpy 1.26.4 / pandas 2.2.3 / pyarrow 19.0.1 / biopython 1.84.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - abcfold==1.1.6
