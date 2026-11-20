@@ -1,0 +1,18 @@
+name: abcfoldrandom-cavity
+# tm_cavity: pyKVFinder substrate-pocket openings of the exported models
+# (from NanoPulldown's envs/cavity_notebook.yaml, without the notebook stack).
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - numpy>=1.26
+  # pthreads (not OpenMP) OpenBLAS: the pyKVFinder wheel bundles its own
+  # libomp; conda's would be a second copy -> "OMP: Error #15" abort.
+  - libopenblas=*=*pthreads*
+  - pandas>=2.0
+  - pyarrow
+  - matplotlib>=3.8
+  - pip
+  - pip:
+      - pyKVFinder==0.9.7

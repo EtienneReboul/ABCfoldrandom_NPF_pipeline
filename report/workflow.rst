@@ -23,7 +23,9 @@ Sections:
 4. **Conformational states**: outward-open / occluded / inward-open read
    from the extremities of the PCA cloud (the V / lambda shape), with
    {{ (cfg.get("tm_states") or {}).get("n_export", 20) }} models per state
-   written for ChimeraX to ``results/<protein>/tm_states/structures/``.
+   written for ChimeraX to ``results/<protein>/tm_states/structures/``,
+   and checked with pyKVFinder: does the CDD substrate pocket of each of
+   those models open outside, inside, or not at all?
 
 Structures are not kept as CIF files: ``scripts/export_models.py`` rebuilds
 any model as mmCIF / PDB from the Parquet store (README).

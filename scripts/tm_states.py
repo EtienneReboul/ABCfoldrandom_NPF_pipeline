@@ -163,6 +163,7 @@ def main() -> int:
     ap.add_argument("--mass-frac", type=float, default=0.005)
     ap.add_argument("--radius-frac", type=float, default=0.05)
     ap.add_argument("--n-export", type=int, default=20)
+    ap.add_argument("--cdd", type=Path, default=None, help="cdd_sites.json: pocket residues shown in the .cxc")
     ap.add_argument("--max-betweenness", type=float, default=0.5)
     ap.add_argument("--min-flatness", type=float, default=0.1)
     ap.add_argument("--min-gap", type=float, default=5.0)
@@ -253,6 +254,14 @@ def main() -> int:
     for f in sdir.glob("*.cxc"):
         f.unlink()
     out["exported"] = ""
+    show = []
+    if a.cdd is not None and a.cdd.exists():
+        for f in json.loads(a.cdd.read_text())["features"]:
+            if "pocket" in (f["description"] or ""):
+                show = [f"# {f['cdd']} {f['name']}: {f['description']}",
+                        f"show :{','.join(str(x) for x in f['residues'])} atoms", "style stick",
+                        "color byhetero"]
+    show.append("# pocket cavities as in ChimeraX's KVFinder tool: kvfinder #1-20 volumeCutoff 100")
     tm_set = set(int(x) for x in tm)
     cxc_all = [f"# {protein}: {a.n_export} models per state (01 = most extreme), superposed on the mean TM frame.",
                f"# verdict: {verdict}" + (f" ({'; '.join(reasons)})" if reasons else ""), "close"]
@@ -281,11 +290,10 @@ def main() -> int:
             cxc_all.append(f"open {s}/{link} name {s}_{rank:02d}")
         n_open += len(pick)
         col = STATE_COLORS[s]
-        cxc += [f"color #1-{len(pick)} {col} target c",
-                "cartoon", "hide atoms", "view"]
+        cxc += [f"color #1-{len(pick)} {col}", "cartoon", "hide atoms", *show, "view"]
         (sdir / s / f"view_{s}.cxc").write_text("\n".join(cxc) + "\n")
-        cxc_all.append(f"color #{first}-{n_open} {col} target c")
-    cxc_all += ["cartoon", "hide atoms", "view"]
+        cxc_all.append(f"color #{first}-{n_open} {col}")
+    cxc_all += ["cartoon", "hide atoms", *show, "view"]
     (sdir / "view.cxc").write_text("\n".join(cxc_all) + "\n")
 
     a.out.parent.mkdir(parents=True, exist_ok=True)

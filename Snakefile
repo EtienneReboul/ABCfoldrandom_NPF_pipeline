@@ -13,8 +13,10 @@ OpenFold3, Protenix, RosettaFold3) instead of AF2, for every Arabidopsis NPF:
   3  collect_models  all models of a protein + confidence vs depth      -> report
   4  tm_pca          TM-helix Ca PCA + GMM states (static + plotly)    -> report
   5  tm_states       OF / Occ / IF from the PCA extremities + 20 models
-                    per state for ChimeraX (cif.gz pool + symlinks)    -> report
-  6  run_stats       timings + storage of every GPU job                -> report
+                    per state for ChimeraX (pdb.gz pool + symlinks)    -> report
+  6  tm_cavity       pyKVFinder substrate pocket of those models: open
+                    outside / inside / occluded vs the PCA state       -> report
+  7  run_stats       timings + storage of every GPU job                -> report
   onsuccess: reports/report.zip
 
 No CIF is kept: scripts/export_models.py writes any model as mmCIF / PDB from
@@ -44,6 +46,7 @@ AB = config["abcfold"]
 ST = config["store"]
 TP = config.get("tm_pca") or {}
 TS = config.get("tm_states") or {}
+TC = config.get("tm_cavity") or {}
 HPC = config.get("hpc") or {}
 FMTS = ",".join(config["report"]["figure_formats"])
 DEPTHS = depth_names(config["depths"])
@@ -100,6 +103,7 @@ rule all:
         str(INP / "proteins.txt"),
         [str(RES / p / "tm_pca" / "tm_pca.parquet") for p in PROTEINS],
         str(REP / "tm_states" / "tm_states_summary.csv"),
+        str(REP / "tm_cavity" / "tm_cavity_summary.csv"),
         str(REP / "run_stats" / "run_stats.csv"),
 
 
@@ -126,6 +130,24 @@ rule protein_list:
         str(INP / "proteins.txt"),
     run:
         Path(output[0]).write_text("\n".join(ALL_PROTEINS) + "\n")
+
+
+# CDD site residues from the InterPro API (network: Mac). tm_states shows
+# them in the ChimeraX scripts, tm_cavity uses them to find the pocket.
+rule cdd_sites:
+    localrule: True
+    input:
+        topology=str(INP / "{protein}" / "topology.json"),
+        fasta=str(INP / "{protein}" / "sequence.fasta"),
+    output:
+        str(INP / "{protein}" / "cdd_sites.json"),
+    shell:
+        "{PY}/fetch_cdd_sites.py --topology {input.topology} --fasta {input.fasta} --out {output}"
+
+
+rule cdd_inputs:
+    input:
+        [str(INP / p / "cdd_sites.json") for p in PROTEINS],
 
 
 rule fold_input:
@@ -286,6 +308,7 @@ rule tm_states:
     input:
         pca=str(RES / "{protein}" / "tm_pca" / "tm_pca.parquet"),
         topology=str(INP / "{protein}" / "topology.json"),
+        cdd=str(INP / "{protein}" / "cdd_sites.json"),
     output:
         table=str(RES / "{protein}" / "tm_states" / "tm_states.parquet"),
         structures=directory(str(RES / "{protein}" / "tm_states" / "structures")),
@@ -310,7 +333,7 @@ rule tm_states:
         """
         {PY}/tm_states.py --pca {input.pca} --topology {input.topology} --mass-frac {params.mass} \
           --radius-frac {params.rad} --n-export {params.n} --max-betweenness {params.betw} \
-          --min-flatness {params.flat} --min-gap {params.gap} --out {output.table} --fig {output.fig} \
+          --min-flatness {params.flat} --min-gap {params.gap} --cdd {input.cdd} --out {output.table} --fig {output.fig} \
           --html {output.html} --formats {FMTS} > {log} 2>&1
         """
 
@@ -329,6 +352,53 @@ rule tm_states_summary:
         "envs/analysis.yaml"
     shell:
         "{PY}/tm_states_summary.py --tables {input} --out {output.table} --fig {output.fig} --formats {FMTS} > {log} 2>&1"
+
+
+rule tm_cavity:
+    input:
+        states=str(RES / "{protein}" / "tm_states" / "tm_states.parquet"),
+        structures=str(RES / "{protein}" / "tm_states" / "structures"),
+        topology=str(INP / "{protein}" / "topology.json"),
+        cdd=str(INP / "{protein}" / "cdd_sites.json"),
+    output:
+        table=str(RES / "{protein}" / "tm_states" / "cavity.parquet"),
+        fig=report(str(REP / "tm_cavity" / "{protein}.svg"), category="4. Conformational states (OF / Occ / IF)",
+                   subcategory=lambda wc: SUBCAT[wc.protein],
+                   labels=lambda wc: {**labels(wc), "view": "pocket (pyKVFinder)"},
+                   caption="report/captions/tm_cavity.rst"),
+    log:
+        str(LOG / "tm_cavity" / "{protein}.log"),
+    conda:
+        "envs/cavity.yaml"
+    threads: 4
+    resources:
+        mem_mb=8000,
+        runtime=60,
+    params:
+        vol=TC.get("volume_cutoff", 100), area=TC.get("min_area", 20), z=TC.get("side_z", 0.5),
+        cdd=TC.get("min_cdd_frac", 0.4),
+    shell:
+        """
+        KMP_WARNINGS=0 {PY}/tm_cavity.py --states {input.states} --topology {input.topology} --cdd {input.cdd} \
+          --volume-cutoff {params.vol} --min-area {params.area} --side-z {params.z} --min-cdd-frac {params.cdd} \
+          --threads {threads} --out {output.table} --fig {output.fig} --formats {FMTS} > {log} 2>&1
+        """
+
+
+rule tm_cavity_summary:
+    input:
+        [str(RES / p / "tm_states" / "cavity.parquet") for p in PROTEINS],
+    output:
+        table=str(REP / "tm_cavity" / "tm_cavity_summary.csv"),
+        fig=report(str(REP / "tm_cavity" / "agreement.svg"), category="4. Conformational states (OF / Occ / IF)",
+                   subcategory="family overview", labels={"view": "pocket agreement"},
+                   caption="report/captions/tm_cavity_summary.rst"),
+    log:
+        str(LOG / "tm_cavity_summary.log"),
+    conda:
+        "envs/analysis.yaml"
+    shell:
+        "{PY}/tm_cavity_summary.py --tables {input} --out {output.table} --fig {output.fig} --formats {FMTS} > {log} 2>&1"
 
 
 rule run_stats:

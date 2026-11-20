@@ -32,9 +32,14 @@ stored in about **27 GB** of Parquet instead, and no CIF is kept (see
  1 import_inputs  MSA + DeepTMHMM topology  ──►  2 run_abcfold    53 x 8 depths x 5 backends = 2,120 GPU jobs
  2 fold_input     424 ABCfold inputs        rsync    (20 seeds x 5 samples each; output packed into
                   (subsampled MSA + seeds)            the Parquet store and deleted inside the job)
+   cdd_sites      CDD pocket residues (InterPro API)
                                                  3 collect_models  all models of a protein, confidence vs depth  [report]
                                                  4 tm_pca          TM-helix Ca PCA + GMM states            [report, static + plotly]
-                                                 5 run_stats       GPU time + storage of every job          [report]
+                                                 5 tm_states       OF / Occ / IF from the PCA extremities, [report]
+                                                                   20 models per state for ChimeraX
+                                                 6 tm_cavity       pyKVFinder pocket openings of those      [report]
+                                                                   models vs the state (CDD pocket residues)
+                                                 7 run_stats       GPU time + storage of every job          [report]
                                                    onsuccess       reports/report.zip
 ```
 
@@ -177,7 +182,7 @@ What is not kept:
 
 ```bash
 conda activate nanopulldown        # controller env: snakemake 9 + datavzrd
-snakemake --use-conda --cores 8 protein_list fold_inputs
+snakemake --use-conda --cores 8 protein_list fold_inputs cdd_inputs
 /opt/homebrew/bin/rsync -a --exclude .snakemake --exclude results --exclude logs --exclude .git \
   ./ hpc-login.u-strasbg.fr:ABCfoldrandom_NPF_pipeline/
 ```
@@ -288,8 +293,9 @@ Every job checks its GPU and records how much it used it:
 | `scripts/make_fold_input.py` | subsampled MSA + seeds, as ABCfold (AF3-dialect) input |
 | `scripts/{collect_models,tm_pca,run_stats}.py` | analysis + report figures |
 | `scripts/caius/` | `setup.sh`, `prime_backends.sh`, `fetch_weights.py`, `run.sh` |
-| `data/inputs/<protein>/` | `<protein>.a3m.xz`, `sequence.fasta`, `topology.json` |
+| `data/inputs/<protein>/` | `<protein>.a3m.xz`, `sequence.fasta`, `topology.json`, `cdd_sites.json` |
 | `data/fold_inputs/<protein>/<depth>.json.xz` | ABCfold inputs (20 seeds each) |
 | `results/<protein>/predictions/<depth>/<backend>/` | `models.parquet`, `pae.parquet`, `atoms.parquet`, `run.json` |
 | `results/<protein>/models.parquet` | every model of a protein, scores + TM pLDDT, no binary columns |
 | `results/<protein>/tm_pca/` | PCA table, `model.npz`, `structures/` (+ `view.cxc`) |
+| `results/<protein>/tm_states/` | per-model state + alpha, `cavity.parquet` (pyKVFinder pocket), `structures/{pool,OF,Occ,IF}/` (+ `view.cxc`) |
