@@ -25,7 +25,8 @@ Sections:
    {{ (cfg.get("tm_states") or {}).get("n_export", 20) }} models per state
    written for ChimeraX to ``results/<protein>/tm_states/structures/``,
    and checked with pyKVFinder: does the CDD substrate pocket of each of
-   those models open outside, inside, or not at all?
+   those models open outside, inside, or not at all? Run on the raw
+   models and on OpenMM-minimized copies (side chains move the openings).
 
 Structures are not kept as CIF files: ``scripts/export_models.py`` rebuilds
 any model as mmCIF / PDB from the Parquet store (README).

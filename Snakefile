@@ -14,8 +14,9 @@ OpenFold3, Protenix, RosettaFold3) instead of AF2, for every Arabidopsis NPF:
   4  tm_pca          TM-helix Ca PCA + GMM states (static + plotly)    -> report
   5  tm_states       OF / Occ / IF from the PCA extremities + 20 models
                     per state for ChimeraX (pdb.gz pool + symlinks)    -> report
-  6  tm_cavity       pyKVFinder substrate pocket of those models: open
-                    outside / inside / occluded vs the PCA state       -> report
+  5b tm_minimize     OpenMM minimization of those models (GPU; NanoPulldown's scheme)
+  6  tm_cavity       pyKVFinder substrate pocket of those models, raw and
+                    minimized: open outside / inside / occluded vs the PCA state -> report
   7  run_stats       timings + storage of every GPU job                -> report
   onsuccess: reports/report.zip
 
@@ -47,6 +48,7 @@ ST = config["store"]
 TP = config.get("tm_pca") or {}
 TS = config.get("tm_states") or {}
 TC = config.get("tm_cavity") or {}
+TM = config.get("tm_minimize") or {}
 HPC = config.get("hpc") or {}
 FMTS = ",".join(config["report"]["figure_formats"])
 DEPTHS = depth_names(config["depths"])
@@ -104,6 +106,7 @@ rule all:
         [str(RES / p / "tm_pca" / "tm_pca.parquet") for p in PROTEINS],
         str(REP / "tm_states" / "tm_states_summary.csv"),
         str(REP / "tm_cavity" / "tm_cavity_summary.csv"),
+        str(REP / "tm_cavity" / "tm_cavity_summary_minimized.csv"),
         str(REP / "run_stats" / "run_stats.csv"),
 
 
@@ -327,12 +330,12 @@ rule tm_states:
         mem_mb=8000,
         runtime=60,
     params:
-        mass=TS.get("mass_frac", 0.005), rad=TS.get("radius_frac", 0.05), n=TS.get("n_export", 20),
+        mass=TS.get("mass_frac", 0.005), rad=TS.get("radius_frac", 0.05), n=TS.get("n_export", 20), floor=TS.get("alpha_floor", 0.8),
         betw=TS.get("max_betweenness", 0.5), flat=TS.get("min_flatness", 0.1), gap=TS.get("min_gap", 5.0),
     shell:
         """
         {PY}/tm_states.py --pca {input.pca} --topology {input.topology} --mass-frac {params.mass} \
-          --radius-frac {params.rad} --n-export {params.n} --max-betweenness {params.betw} \
+          --radius-frac {params.rad} --n-export {params.n} --alpha-floor {params.floor} --max-betweenness {params.betw} \
           --min-flatness {params.flat} --min-gap {params.gap} --cdd {input.cdd} --out {output.table} --fig {output.fig} \
           --html {output.html} --formats {FMTS} > {log} 2>&1
         """
@@ -352,6 +355,37 @@ rule tm_states_summary:
         "envs/analysis.yaml"
     shell:
         "{PY}/tm_states_summary.py --tables {input} --out {output.table} --fig {output.fig} --formats {FMTS} > {log} 2>&1"
+
+
+# GPU job (CUDA on SLURM, OpenCL = Apple GPU on the Mac: tm_minimize.platforms).
+MIN_RES = {k: v for k, v in GPU_RES.items() if k != "constraint"}
+if HPC.get("gpu_constraint_retry"):   # OpenMM's CUDA kernels: a recent card
+    MIN_RES["constraint"] = HPC["gpu_constraint_retry"]
+
+
+rule tm_minimize:
+    input:
+        states=str(RES / "{protein}" / "tm_states" / "tm_states.parquet"),
+        structures=str(RES / "{protein}" / "tm_states" / "structures"),
+    output:
+        table=str(RES / "{protein}" / "tm_states" / "minimize.parquet"),
+        structures=directory(str(RES / "{protein}" / "tm_states" / "minimized")),
+    log:
+        str(LOG / "tm_minimize" / "{protein}.log"),
+    conda:
+        "envs/minimize.yaml"
+    resources:
+        runtime=180,
+        **MIN_RES,
+    params:
+        plat=",".join(TM.get("platforms", ["CUDA", "OpenCL"])), steps=TM.get("max_steps", 2000),
+        probe=TM.get("probe_steps", 200), pre=TM.get("pre_relax_steps", 500), budget=TM.get("max_minutes", 15),
+    shell:
+        """
+        {PY}/tm_minimize.py --states {input.states} --platforms {params.plat} --max-steps {params.steps} \
+          --probe-steps {params.probe} --pre-steps {params.pre} --max-minutes {params.budget} \
+          --out {output.table} > {log} 2>&1
+        """
 
 
 rule tm_cavity:
@@ -375,12 +409,47 @@ rule tm_cavity:
         mem_mb=8000,
         runtime=60,
     params:
-        vol=TC.get("volume_cutoff", 100), area=TC.get("min_area", 20), z=TC.get("side_z", 0.5),
+        vol=TC.get("volume_cutoff", 100), po=TC.get("probe_out", 8.0), area=TC.get("min_area", 20),
+        z=TC.get("side_z", 0.5),
         cdd=TC.get("min_cdd_frac", 0.4),
     shell:
         """
         KMP_WARNINGS=0 {PY}/tm_cavity.py --states {input.states} --topology {input.topology} --cdd {input.cdd} \
-          --volume-cutoff {params.vol} --min-area {params.area} --side-z {params.z} --min-cdd-frac {params.cdd} \
+          --volume-cutoff {params.vol} --probe-out {params.po} --min-area {params.area} --side-z {params.z} --min-cdd-frac {params.cdd} \
+          --threads {threads} --out {output.table} --fig {output.fig} --formats {FMTS} > {log} 2>&1
+        """
+
+
+rule tm_cavity_minimized:
+    input:
+        states=str(RES / "{protein}" / "tm_states" / "tm_states.parquet"),
+        structures=str(RES / "{protein}" / "tm_states" / "minimized"),
+        topology=str(INP / "{protein}" / "topology.json"),
+        cdd=str(INP / "{protein}" / "cdd_sites.json"),
+    output:
+        table=str(RES / "{protein}" / "tm_states" / "cavity_minimized.parquet"),
+        fig=report(str(REP / "tm_cavity" / "{protein}_minimized.svg"),
+                   category="4. Conformational states (OF / Occ / IF)",
+                   subcategory=lambda wc: SUBCAT[wc.protein],
+                   labels=lambda wc: {**labels(wc), "view": "pocket (pyKVFinder), minimized"},
+                   caption="report/captions/tm_cavity.rst"),
+    log:
+        str(LOG / "tm_cavity" / "{protein}_minimized.log"),
+    conda:
+        "envs/cavity.yaml"
+    threads: 4
+    resources:
+        mem_mb=8000,
+        runtime=60,
+    params:
+        vol=TC.get("volume_cutoff", 100), po=TC.get("probe_out", 8.0), area=TC.get("min_area", 20),
+        z=TC.get("side_z", 0.5),
+        cdd=TC.get("min_cdd_frac", 0.4),
+    shell:
+        """
+        KMP_WARNINGS=0 {PY}/tm_cavity.py --states {input.states} --structures {input.structures} \
+          --label "OpenMM-minimized models" --topology {input.topology} --cdd {input.cdd} \
+          --volume-cutoff {params.vol} --probe-out {params.po} --min-area {params.area} --side-z {params.z} --min-cdd-frac {params.cdd} \
           --threads {threads} --out {output.table} --fig {output.fig} --formats {FMTS} > {log} 2>&1
         """
 
@@ -399,6 +468,24 @@ rule tm_cavity_summary:
         "envs/analysis.yaml"
     shell:
         "{PY}/tm_cavity_summary.py --tables {input} --out {output.table} --fig {output.fig} --formats {FMTS} > {log} 2>&1"
+
+
+rule tm_cavity_summary_minimized:
+    input:
+        [str(RES / p / "tm_states" / "cavity_minimized.parquet") for p in PROTEINS],
+    output:
+        table=str(REP / "tm_cavity" / "tm_cavity_summary_minimized.csv"),
+        fig=report(str(REP / "tm_cavity" / "agreement_minimized.svg"),
+                   category="4. Conformational states (OF / Occ / IF)",
+                   subcategory="family overview", labels={"view": "pocket agreement, minimized"},
+                   caption="report/captions/tm_cavity_summary.rst"),
+    log:
+        str(LOG / "tm_cavity_summary_minimized.log"),
+    conda:
+        "envs/analysis.yaml"
+    shell:
+        "{PY}/tm_cavity_summary.py --tables {input} --label 'OpenMM-minimized models' --out {output.table} "
+        "--fig {output.fig} --formats {FMTS} > {log} 2>&1"
 
 
 rule run_stats:

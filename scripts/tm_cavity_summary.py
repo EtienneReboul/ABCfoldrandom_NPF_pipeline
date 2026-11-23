@@ -20,7 +20,7 @@ import pandas as pd  # noqa: E402
 from common import save_fig  # noqa: E402
 
 STATES = ["OF", "Occ", "IF"]
-CALLS = ["extra-open", "occluded", "intra-open", "both-open", "lateral-only", "no pocket"]
+CALLS = ["extra-open", "occluded", "intra-open", "both-open", "lateral-only", "no pocket", "not minimized"]
 STATE_COLORS = {"OF": "#d62728", "Occ": "#f0a30a", "IF": "#2457c5"}
 
 
@@ -30,6 +30,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--fig", type=Path, required=True)
     ap.add_argument("--formats", default="svg")
+    ap.add_argument("--label", default="raw models")
     a = ap.parse_args()
 
     parts = []
@@ -114,10 +115,10 @@ def main() -> int:
     ax.set_yticklabels([p.split("_")[0] + ("" if v == "resolved" else " *") + (" (geom)" if s == "geometry" else "")
                         for p, v, s in zip(per.index, per["verdict"], per["pocket_source"])], fontsize=6)
     ax.set_title("agreement per protein (* unresolved, geom = no CDD site)", fontsize=10)
-    fig.suptitle("pyKVFinder substrate pocket vs PCA-extremity state, all exported models", fontsize=12)
+    fig.suptitle(f"pyKVFinder substrate pocket vs PCA-extremity state, all exported {a.label}", fontsize=12)
     fig.tight_layout()
     save_fig(fig, a.fig, a.formats.split(","))
-    print(f"[tm_cavity_summary] resolved: {res['agree'].mean():.1%} agree over {len(res)} models; "
+    print(f"[tm_cavity_summary] {a.label}: resolved: {res['agree'].mean():.1%} agree over {len(res)} models; "
           f"unresolved: {un['agree'].mean() if len(un) else float('nan'):.1%}")
     return 0
 

@@ -48,18 +48,31 @@ tm_pca:
 tm_states:
   mass_frac: 0.005           # trim: a model needs >= this fraction of the models (min 15) ...
   radius_frac: 0.05          # ... within this fraction of the cloud diameter
-  n_export: 20               # models written per state (spread over its alpha range)
+  n_export: 20               # models written per state (spread over its alpha range) ...
+  alpha_floor: 0.8           # ... among members with alpha >= this: drops the half-way arm models
   max_betweenness: 0.5       # QC: occluded tip excess / next corner's (small = clear tip)
   min_flatness: 0.1          # QC: 2 x triangle area / longest side^2 (a line has no tip)
   min_gap: 5.0               # QC: OF-IF (extra - intra) difference, A
 
 # ── pyKVFinder pocket of the exported models (scripts/tm_cavity.py) ───────
-# ChimeraX kvfinder settings otherwise (probe 1.4 / 4.0 A, step 0.6 A).
+# ChimeraX kvfinder settings otherwise (probe in 1.4 A, step 0.6 A).
 tm_cavity:
   volume_cutoff: 100         # A^3, as `kvfinder #.. volumeCutoff 100`
+  probe_out: 8.0             # A; ChimeraX's 4 A turns a wide-open vestibule into bulk (pocket lost)
   min_area: 20               # A^2: smaller openings are ignored
   side_z: 0.5                # opening above +side_z half-membranes = outside, below - = inside, else lateral
   min_cdd_frac: 0.4          # fewer CDD pocket residues lining any cavity = "no pocket"
+
+# ── OpenMM minimization of the exported models (scripts/tm_minimize.py) ───
+# NanoPulldown's scheme: PDBFixer (+H, pH 7) -> vacuum pre-relax with charges
+# off -> amber14-all + implicit/gbn2 L-BFGS. GPU only by default (CPU ~20x
+# slower: 3 min per NPF model on 8 threads vs 5-10 s on an Apple M4 GPU).
+tm_minimize:
+  platforms: ["CUDA", "OpenCL"]   # first that starts; add "CPU" to allow it
+  max_steps: 2000
+  probe_steps: 200
+  pre_relax_steps: 500
+  max_minutes: 15                 # per model
 
 # ── Report ───────────────────────────────────────────────────────────────
 report:

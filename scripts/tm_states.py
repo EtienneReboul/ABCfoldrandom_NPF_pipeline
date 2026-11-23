@@ -36,7 +36,9 @@ inside: chosen from geometry alone, so an independent check).
 
 Outputs (results/<protein>/tm_states/): tm_states.parquet (per model: alpha_*,
 state, openings, exported), tm_states.json, structures/ = n_export models
-per state spread over the state's alpha range (01 = the most extreme),
+per state spread over the alpha range of the state's members whose alpha
+for it is >= alpha_floor (01 = the most extreme; fewer if fewer pass; the
+models between two corners, partway along an arm, are left out),
 superposed on the mean TM frame of step 4: each written once to pool/ as
 .pdb.gz (ChimeraX reads gzipped PDB, not gzipped mmCIF), the per-state folders OF/ Occ/ IF/ hold relative symlinks, with
 ChimeraX scripts view.cxc (all) and view_<state>.cxc. Plus a 2-panel figure
@@ -163,6 +165,8 @@ def main() -> int:
     ap.add_argument("--mass-frac", type=float, default=0.005)
     ap.add_argument("--radius-frac", type=float, default=0.05)
     ap.add_argument("--n-export", type=int, default=20)
+    ap.add_argument("--alpha-floor", type=float, default=0.8,
+                    help="export only members whose alpha for their state is >= this")
     ap.add_argument("--cdd", type=Path, default=None, help="cdd_sites.json: pocket residues shown in the .cxc")
     ap.add_argument("--max-betweenness", type=float, default=0.5)
     ap.add_argument("--min-flatness", type=float, default=0.1)
@@ -244,7 +248,7 @@ def main() -> int:
         out.loc[fidx[caps[i]], "cap"] = s
     out = pd.concat([out, op], axis=1)
 
-    # ── exported structures: n per state spread over its alpha range ──────
+    # ── exported structures: n per state over its alpha range >= floor ────
     sdir = a.out.parent / "structures"
     pool = sdir / "pool"
     for d in [pool, *(sdir / s for s in STATES)]:
@@ -263,14 +267,20 @@ def main() -> int:
                         "color byhetero"]
     show.append("# pocket cavities as in ChimeraX's KVFinder tool: kvfinder #1-20 volumeCutoff 100")
     tm_set = set(int(x) for x in tm)
-    cxc_all = [f"# {protein}: {a.n_export} models per state (01 = most extreme), superposed on the mean TM frame.",
+    cxc_all = [f"# {protein}: {a.n_export} models per state, alpha >= {a.alpha_floor} (01 = most extreme),"
+               " superposed on the mean TM frame.",
                f"# verdict: {verdict}" + (f" ({'; '.join(reasons)})" if reasons else ""), "close"]
     n_open = 0
+    export = {}
     for s in STATES:
         mem = np.flatnonzero(out["state"].to_numpy() == s)
+        n_mem = len(mem)
+        mem = mem[out[f"alpha_{s}"].to_numpy()[mem] >= a.alpha_floor]
         mem = mem[np.argsort(-out[f"alpha_{s}"].to_numpy()[mem])]
+        export[s] = {"members": int(n_mem), "above_floor": int(len(mem))}
         pick = mem[np.unique(np.linspace(0, len(mem) - 1, min(a.n_export, len(mem))).round().astype(int))]
-        cxc = [f"# {protein} {STATE_NAMES[s]}: {len(pick)}/{len(mem)} models over the alpha_{s} range", "close"]
+        cxc = [f"# {protein} {STATE_NAMES[s]}: {len(pick)}/{len(mem)} models over the alpha_{s} range"
+               f" >= {a.alpha_floor} ({n_mem} members)", "close"]
         first = n_open + 1
         for rank, k in enumerate(pick, 1):
             r = out.iloc[k]
@@ -289,6 +299,9 @@ def main() -> int:
             cxc.append(f"open {link} name {s}_{rank:02d}")
             cxc_all.append(f"open {s}/{link} name {s}_{rank:02d}")
         n_open += len(pick)
+        export[s]["exported"] = len(pick)
+        if len(pick) < a.n_export:
+            print(f"WARNING {protein} {s}: only {len(pick)} members with alpha >= {a.alpha_floor}")
         col = STATE_COLORS[s]
         cxc += [f"color #1-{len(pick)} {col}", "cartoon", "hide atoms", *show, "view"]
         (sdir / s / f"view_{s}.cxc").write_text("\n".join(cxc) + "\n")
@@ -306,6 +319,7 @@ def main() -> int:
         "corners": {lab[i]: {"PC1": float(centres[i][0]), "PC2": float(centres[i][1]), "excess": excess[i],
                              **{k: round(v, 2) for k, v in cap_op[i].items()}} for i in range(3)},
         "sizes": {s: int((out["state"] == s).sum()) for s in STATES},
+        "alpha_floor": a.alpha_floor, "export": export,
     }
     (a.out.parent / "tm_states.json").write_text(json.dumps(summary, indent=1))
 

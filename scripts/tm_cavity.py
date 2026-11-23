@@ -5,8 +5,12 @@ the OF / Occ / IF call made from the PCA geometry.
 
 Per model (structures/pool/*.pdb.gz):
   1. pyKVFinder cavities with ChimeraX's kvfinder settings (probe in 1.4 A,
-     probe out 4.0 A, removal distance 2.4 A, step 0.6 A) and
-     --volume-cutoff (100 A^3, as `kvfinder ... volumeCutoff 100`)
+     removal distance 2.4 A, step 0.6 A, --volume-cutoff 100 A^3 as
+     `kvfinder ... volumeCutoff 100`) EXCEPT the outer probe: --probe-out
+     8 A, not 4. With 4 A a wide-open vestibule counts as bulk solvent and
+     the pocket vanishes (NPF2.10 outward-open models: "no pocket" or a
+     lateral remnant at 4 A, extra-open with 70 % of the CDD residues lining
+     it at 6 and 8 A; closed pockets give the same calls at 4, 6 and 8 A).
   2. pocket = the cavity lined by the most CDD "chemical substrate binding
      pocket" residues (data/inputs/<protein>/cdd_sites.json, InterPro API);
      without a CDD site: the cavity whose centroid lies nearest the transport
@@ -22,9 +26,15 @@ Per model (structures/pool/*.pdb.gz):
      line any cavity: a collapsed or misfolded site).
      agree: OF <-> extra-open, Occ <-> occluded, IF <-> intra-open.
 
-Outputs (results/<protein>/tm_states/): cavity.parquet (per exported model)
-and a figure: per state, the opening areas of its exported models (outside
-up, inside down) ordered by alpha as in the file names.
+Run on the raw exported models (structures/ -> cavity.parquet) and on their
+OpenMM-minimized copies (step 5b, minimized/ -> cavity_minimized.parquet,
+--structures): the openings depend on side-chain placement. Hydrogens are
+dropped before detection so both sets see the same heavy atoms; a model
+whose minimization failed is called "not minimized".
+
+Outputs (results/<protein>/tm_states/): cavity[_minimized].parquet (per
+exported model) and a figure: per state, the opening areas of its exported
+models (outside up, inside down) ordered by alpha as in the file names.
 """
 from __future__ import annotations
 
@@ -49,7 +59,7 @@ logging.getLogger().setLevel(logging.ERROR)   # "OXT not in dictionary" per mode
 STATES = ["OF", "Occ", "IF"]
 STATE_COLORS = {"OF": "#d62728", "Occ": "#f0a30a", "IF": "#2457c5"}
 EXPECT = {"OF": "extra-open", "Occ": "occluded", "IF": "intra-open"}
-STEP, PROBE_IN, PROBE_OUT, REMOVAL = 0.6, 1.4, 4.0, 2.4
+STEP, PROBE_IN, REMOVAL = 0.6, 1.4, 2.4
 
 
 def label(name: str) -> int:
@@ -82,10 +92,11 @@ def analyse(path: Path, topo, cdd, a, vdw):
         atomic = pyKVFinder.read_pdb(tmp, vdw)
     finally:
         os.unlink(tmp)
+    atomic = atomic[[not str(n).startswith("H") for n in atomic[:, 3]]]   # heavy atoms only
     ctr, nrm, H = membrane_frame(atomic, topo)
-    verts = pyKVFinder.get_vertices(atomic, probe_out=PROBE_OUT, step=STEP)
+    verts = pyKVFinder.get_vertices(atomic, probe_out=a.probe_out, step=STEP)
     origin = verts[0]
-    ncav, cav = pyKVFinder.detect(atomic, verts, step=STEP, probe_in=PROBE_IN, probe_out=PROBE_OUT,
+    ncav, cav = pyKVFinder.detect(atomic, verts, step=STEP, probe_in=PROBE_IN, probe_out=a.probe_out,
                                   removal_distance=REMOVAL, volume_cutoff=a.volume_cutoff, nthreads=a.threads)
     row = {"n_cavities": int(ncav)}
     if ncav == 0:
@@ -132,7 +143,10 @@ def main() -> int:
     ap.add_argument("--states", type=Path, required=True, help="tm_states.parquet (structures/ next to it)")
     ap.add_argument("--topology", type=Path, required=True)
     ap.add_argument("--cdd", type=Path, required=True)
+    ap.add_argument("--structures", type=Path, default=None, help="default: structures/ next to --states")
+    ap.add_argument("--label", default="raw models", help="figure title: which structures")
     ap.add_argument("--volume-cutoff", type=float, default=100.0)
+    ap.add_argument("--probe-out", type=float, default=8.0)
     ap.add_argument("--min-area", type=float, default=20.0)
     ap.add_argument("--side-z", type=float, default=0.5)
     ap.add_argument("--min-cdd-frac", type=float, default=0.4)
@@ -148,14 +162,15 @@ def main() -> int:
     cdd = set(feats[0]["residues"]) if feats else set()
     st = pd.read_parquet(a.states)
     st = st[st["exported"] != ""].reset_index(drop=True)
-    sdir = a.states.parent / "structures"
+    sdir = a.structures or a.states.parent / "structures"
     vdw = pyKVFinder.read_vdw()
     rows = []
     for r in st.itertuples(index=False):
         s, link = r.exported.split("/")
+        f = sdir / r.exported
+        res = analyse(f, topo, cdd, a, vdw) if f.exists() else {"call": "not minimized"}
         rows.append({"protein": protein, "state": s, "rank": int(link[:2]), "alpha": float(getattr(r, f"alpha_{s}")),
-                     "depth": r.depth, "backend": r.backend, "model_id": r.model_id, "file": r.exported,
-                     **analyse(sdir / r.exported, topo, cdd, a, vdw)})
+                     "depth": r.depth, "backend": r.backend, "model_id": r.model_id, "file": r.exported, **res})
     out = pd.DataFrame(rows)
     for c in ("open_extra", "open_intra", "open_lateral"):
         out[c] = out.get(c, pd.Series(np.nan, index=out.index)).fillna(0.0)
@@ -190,7 +205,7 @@ def main() -> int:
     axes[0].set_ylabel("pocket opening area (A^2): outside up, inside down")
     axes[0].legend(fontsize=7, frameon=False, loc="upper right")
     src = "CDD pocket residues" if cdd else "no CDD site: pocket = cavity nearest the transport axis"
-    fig.suptitle(f"{protein}: pyKVFinder substrate pocket of the exported models ({src}; o = occluded, "
+    fig.suptitle(f"{protein}: pyKVFinder substrate pocket of the exported {a.label} ({src}; o = occluded, "
                  f"x = no pocket, pink = disagrees with the PCA state)", fontsize=10)
     fig.tight_layout()
     for fmt in a.formats.split(","):

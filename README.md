@@ -37,8 +37,9 @@ stored in about **27 GB** of Parquet instead, and no CIF is kept (see
                                                  4 tm_pca          TM-helix Ca PCA + GMM states            [report, static + plotly]
                                                  5 tm_states       OF / Occ / IF from the PCA extremities, [report]
                                                                    20 models per state for ChimeraX
+                                                 5b tm_minimize    OpenMM minimization of those models (GPU)
                                                  6 tm_cavity       pyKVFinder pocket openings of those      [report]
-                                                                   models vs the state (CDD pocket residues)
+                                                                   models, raw + minimized, vs the state
                                                  7 run_stats       GPU time + storage of every job          [report]
                                                    onsuccess       reports/report.zip
 ```
@@ -298,4 +299,4 @@ Every job checks its GPU and records how much it used it:
 | `results/<protein>/predictions/<depth>/<backend>/` | `models.parquet`, `pae.parquet`, `atoms.parquet`, `run.json` |
 | `results/<protein>/models.parquet` | every model of a protein, scores + TM pLDDT, no binary columns |
 | `results/<protein>/tm_pca/` | PCA table, `model.npz`, `structures/` (+ `view.cxc`) |
-| `results/<protein>/tm_states/` | per-model state + alpha, `cavity.parquet` (pyKVFinder pocket), `structures/{pool,OF,Occ,IF}/` (+ `view.cxc`) |
+| `results/<protein>/tm_states/` | per-model state + alpha, `cavity[_minimized].parquet` (pyKVFinder pocket), `structures/` and `minimized/` (`{pool,OF,Occ,IF}/` + `view.cxc`), `minimize.parquet` |
