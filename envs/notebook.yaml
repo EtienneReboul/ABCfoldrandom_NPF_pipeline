@@ -1,0 +1,17 @@
+# Analysis notebooks in notebooks/ (not used by the Snakefile).
+#   conda env create -f envs/notebook.yaml
+name: abcfoldrandom-npf-notebook
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - numpy
+  - pandas
+  - pyarrow
+  - matplotlib
+  - pyyaml
+  - jupyterlab
+  - ipykernel
+  - nbformat
+  - nbconvert
